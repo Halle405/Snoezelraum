@@ -1,0 +1,231 @@
+#include "FastLED.h"
+
+// Snoozel 3.2 - 10.11.2018
+// Snoozel-Raum Animation mit Neopixel-Elementen
+
+
+#if FASTLED_VERSION < 3001000
+#error "Requires FastLED 3.1 or later; check github for latest code."
+#endif
+
+#define DATA_PIN    11
+#define LED_TYPE    WS2811
+#define COLOR_ORDER RGB
+//Anzahl Elemente
+#define NUM_ELEM 6
+//Leds pro Element
+#define LED_ELEM 6
+//Gesamtanzahl Leds berechnen
+#define NUM_LEDS    (NUM_ELEM*LED_ELEM)
+CRGB leds[NUM_LEDS];
+
+//Potis
+#define A_PIN 3           // A poti 
+#define B_PIN 2           // B poti 
+#define C_PIN 1           // C poti 
+#define D_PIN 0           // D poti
+
+#define ARRAY_SIZE(A) (sizeof(A) / sizeof((A)[0]))
+
+//global counter
+int i=0;
+
+int a_val = 0;  
+int b_val = 0;
+int c_val = 0;
+int d_val = 0;
+
+//Masterbrightness
+int BRIGHTNESS = 96;
+
+//Zeitvariabelen
+unsigned long Framerate;    //Zeit für Framerate
+
+// List of patterns to cycle through.  Each is defined as a separate function below.
+typedef void (*SimplePatternList[])();
+SimplePatternList gPatterns = { allOn, fading, line, loading, rainbowWithGlitter, confetti, sinelon, wave };
+int gCurrentPatternNumber = 0; // Index number of which pattern is current
+int gHue = 255;
+
+
+
+//Setup ---------------------------------------------
+void setup() {
+  delay(3000); // 3 second delay for recovery
+  
+  Serial.begin(9600); // Serielle Verbindung aktivieren
+  
+  // LED Strip konfigurieren
+  FastLED.addLeds<LED_TYPE,DATA_PIN,COLOR_ORDER>(leds, NUM_LEDS).setCorrection(TypicalLEDStrip);
+ 
+  pinMode(A_PIN, INPUT_PULLUP);  //A Poti
+  pinMode(B_PIN, INPUT_PULLUP);  //usw.
+  pinMode(C_PIN, INPUT_PULLUP);
+  pinMode(D_PIN, INPUT_PULLUP);
+}
+
+
+
+// Haupt-Loop ---------------------------------------
+void loop()
+{    
+  //Master Helligkeit einstellen
+  a_val = analogRead(A_PIN);    // 1.Poti lesen
+  BRIGHTNESS = map(a_val, 0, 1023, 0, 220); // Helligkeit
+  FastLED.setBrightness(BRIGHTNESS);
+  
+  //Framerate einstellen und Leds updaten
+  b_val = analogRead(B_PIN);    // 2.Poti lesen
+  Framerate = map(b_val, 0, 1023, 2, 20); // Framerate
+
+  //Grundfarbe einstellen
+  c_val = analogRead(C_PIN);
+  gHue = map(c_val, 0, 1023, 0, 255);
+
+  //Muster einstellen
+  d_val = analogRead(D_PIN);
+  int old = gCurrentPatternNumber;
+  gCurrentPatternNumber = map(d_val, 0, 1023, 0, ARRAY_SIZE (gPatterns) -1);
+  //cleat all LEDS when pattern changes and reset global variables
+  if (old != gCurrentPatternNumber) {
+	reset();
+  }
+
+  // Call the current pattern function once, updating the 'leds' array
+  gPatterns[gCurrentPatternNumber]();
+  
+  FastLED.delay(1000/Framerate); 
+  FastLED.show();
+}
+
+
+// Benutze Funktionen --------------------------------
+
+//Nächste Animation über Nummer +1 inkl. Überlaufkontrolle
+void reset() {
+  for(int i = 0; i< NUM_LEDS; i++) {
+	leds[i] = CHSV(0,0,0);
+  }
+  FastLED.show();
+  i = 0;
+  delay(1000);
+}
+
+//show all leds in selected color
+void allOn() {
+  for(int i = 0; i < NUM_LEDS; i++) {
+	leds[i] = CHSV(gHue, 127, 255);
+  }
+}
+
+//fading all leds until off, then restart
+void fading() {
+  fadeToBlackBy(leds, NUM_LEDS, 5);
+  if(i == 1) {
+	allOn();
+  }
+  if(i == 100) {
+	i = 0;
+  }
+  i++;
+}
+
+//circle on every Element
+void loading() {
+  fadeToBlackBy(leds, NUM_LEDS, 200);
+  for(int elem = 0; elem < NUM_ELEM; elem++) {
+	leds[elem*6+i] = CHSV(gHue, 200, 255);;
+  }
+  i++;
+  if(i > 5) {
+	i = 0;
+  }
+}
+
+//dot wandering trough leds in order with trailing line
+void line() {
+  fadeToBlackBy(leds, NUM_LEDS, 20);
+  leds[i] = CHSV(gHue, 200, 255);;
+  i++;
+  if(i > NUM_LEDS ) {
+	i = 0;
+  }
+}
+
+
+void rainbow()
+// Variabel: Grundfarbe, Delta-Farbe 
+{
+  // fill_rainbow (Ziel-Array, int Anzahl Leds, uint8_t Base-Farbe, uint8_t Delta-Farbe)
+  fill_rainbow( leds, NUM_LEDS, gHue, 1);
+}
+
+
+void rainbowWithGlitter() 
+{
+  // built-in FastLED rainbow, plus some random sparkly glitter
+  rainbow();
+  addGlitter(80);
+}
+
+void addGlitter( fract8 chanceOfGlitter)
+// Random Zahlen
+// random8() gibt 0 bis 255
+// random16() gibt 0 bis 65535
+// (m,n) unteres/oberes Limit 
+{
+  if( random8() < chanceOfGlitter) {
+    leds[ random16(NUM_LEDS) ] += CRGB::White;
+  }
+}
+
+void confetti() 
+{
+  // random colored speckles that blink in and fade smoothly  
+  fadeToBlackBy( leds, NUM_LEDS, 5); // Alle leds runterdimmen
+  int pos = random16(NUM_LEDS); //Random Led aussuchen
+  leds[pos] += CHSV( gHue + random8(40), 200, 255); //Random LED hochziehen
+  // Variabel: Farbton-Varianz (random), Helligkeit, Sättigung
+}
+
+void sinelon()
+{
+  // a colored dot sweeping back and forth, with fading trails
+  fadeToBlackBy( leds, NUM_LEDS, 5); // Alle leds runterdimmen
+  int pos = beatsin16(13,0,NUM_LEDS); // Led auswählen über Sinusfunktion (bpm, lowbound, highbound)
+  leds[pos] += CHSV( gHue, 255, 192); // Led hochziehen
+}
+
+void bpm()
+{
+  // colored stripes pulsing at a defined Beats-Per-Minute (BPM)
+  uint8_t BeatsPerMinute = 90;
+  CRGBPalette16 palette = OceanColors_p;
+  // Paletten OceanColors_p CloudColors_p LavaColors_p ForestColors_p
+  uint8_t beat = beatsin8( BeatsPerMinute, 64, 255);
+  for( int i = 0; i < NUM_LEDS; i++) { //9948
+    leds[i] = ColorFromPalette(palette, gHue+(i*2), beat-gHue+(i*10));
+  }
+}
+
+void juggle() {
+  // eight colored dots, weaving in and out of sync with each other
+  fadeToBlackBy( leds, NUM_LEDS, 20);
+  byte dothue = 0;
+  for( int i = 0; i < 8; i++) {
+    leds[beatsin16(i+7,0,NUM_LEDS)] |= CHSV(dothue, 200, 255);
+    dothue += 32;
+  }
+}
+
+void wave()
+{
+  // a colored dot sweeping back and forth, with fading trails
+  fadeToBlackBy( leds, NUM_LEDS, 5); // Alle leds runterdimmen
+  int x = beatsin16(5,0,NUM_ELEM); // Led auswählen über Sinusfunktion (bpm, lowbound, highbound)
+  int low = (x*LED_ELEM);
+  int high = (x*LED_ELEM)+LED_ELEM;
+  for( int pos = low; pos < high; pos++) {
+	leds[pos] += CHSV( gHue+ random8(65), 255, 192); // Led hochziehen
+  }
+}
